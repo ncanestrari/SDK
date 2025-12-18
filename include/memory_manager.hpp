@@ -1,13 +1,15 @@
-#pragma once
+#pragma once
 
-#include <memory>
-#include <vector>
 #include <array>
-#include <mutex>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <new>
-#include <atomic>
+#include <set>
+#include <vector>
 
 // Forward declarations
 class MemoryPool;
@@ -41,7 +43,7 @@ private:
     size_t poolSize;
     std::unique_ptr<uint8_t[]> memory;
     std::vector<void*> freeList;
-    std::mutex poolMutex;
+    mutable std::mutex poolMutex;
     
     // Statistics
     std::atomic<size_t> allocatedObjects{0};

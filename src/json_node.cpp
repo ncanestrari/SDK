@@ -1,10 +1,13 @@
+
 #include "json_node.hpp"
+
 #include <fmt/core.h>
+
+#include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
-#include <cctype>
-#include <filesystem>
 
 // JsonNode Implementation
 JsonNode::JsonNode(JsonType t) : type(t), numberValue(0.0), booleanValue(false) {}

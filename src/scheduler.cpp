@@ -1,7 +1,8 @@
 #include "scheduler.hpp"
+
 #include <fmt/core.h>
 
-Scheduler::Scheduler() : stop(false) {
+Scheduler::Scheduler() : stop(false), activeTasks(0) {
     // Create single worker thread
     workerThread = std::thread(&Scheduler::worker, this);
     fmt::print("Scheduler initialized with single worker thread\n");
@@ -23,29 +24,30 @@ void Scheduler::display() const {
 void Scheduler::worker() {
     while (true) {
         Task task;
-        
+
         {
             std::unique_lock<std::mutex> lock(queueMutex);
-            
+
             // Wait for a task or stop signal
-            condition.wait(lock, [this] { 
-                return !taskQueue.empty() || stop.load(); 
+            condition.wait(lock, [this] {
+                return !taskQueue.empty() || stop.load();
             });
-            
+
             // Exit if stopping and no more tasks
             if (stop.load() && taskQueue.empty()) {
                 return;
             }
-            
+
             // Get the next task
             if (!taskQueue.empty()) {
                 task = std::move(taskQueue.front());
                 taskQueue.pop();
+                activeTasks.fetch_add(1);
             } else {
                 continue; // Spurious wakeup, continue waiting
             }
         }
-        
+
         // Execute the task outside of the lock
         try {
             task();
@@ -54,25 +56,15 @@ void Scheduler::worker() {
         } catch (...) {
             fmt::print("Task execution failed with unknown exception\n");
         }
-    }
-}
 
-void Scheduler::schedule(Task task) {
-    {
-        std::unique_lock<std::mutex> lock(queueMutex);
-        
-        if (stop.load()) {
-            fmt::print("Warning: Scheduler is shutting down, task rejected\n");
-            return;
-        }
-        
-        taskQueue.push(std::move(task));
+        // Task completed
+        activeTasks.fetch_sub(1);
+        completionCondition.notify_all();
     }
-    condition.notify_one();
 }
 
 size_t Scheduler::getPendingTasks() const {
-    std::unique_lock<std::mutex> lock(queueMutex);
+    std::lock_guard<std::mutex> lock(queueMutex);
     return taskQueue.size();
 }
 
@@ -81,12 +73,10 @@ bool Scheduler::isRunning() const {
 }
 
 void Scheduler::waitForAll() {
-    while (getPendingTasks() > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    
-    // Additional small delay to ensure worker has finished current task
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::unique_lock<std::mutex> lock(queueMutex);
+    completionCondition.wait(lock, [this] {
+        return taskQueue.empty() && activeTasks.load() == 0;
+    });
 }
 
 void Scheduler::shutdown() {
@@ -107,7 +97,7 @@ void Scheduler::shutdown() {
     
     // Clear any remaining tasks
     {
-        std::unique_lock<std::mutex> lock(queueMutex);
+        std::lock_guard<std::mutex> lock(queueMutex);
         std::queue<Task> empty;
         taskQueue.swap(empty);
     }

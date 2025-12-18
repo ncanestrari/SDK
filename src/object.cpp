@@ -1,4 +1,5 @@
 #include "object.hpp"
+
 #include <fmt/core.h>
 
 // Object class implementation

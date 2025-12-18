@@ -1,7 +1,9 @@
+
 #include "json_init_generator.hpp"
+
+#include <fmt/core.h>
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "llvm/Support/CommandLine.h"
-#include <fmt/core.h>
 
 using namespace clang::tooling;
 using namespace llvm;
@@ -81,22 +83,6 @@ public:
     }
 };
 
-// Custom action that collects class information
-class CollectingJsonInitAction : public clang::ASTFrontendAction {
-private:
-    std::vector<ClassInfo>* classes;
-    
-public:
-    CollectingJsonInitAction(std::vector<ClassInfo>* classContainer) 
-        : classes(classContainer) {}
-    
-    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
-        clang::CompilerInstance& compiler, 
-        llvm::StringRef file) override {
-        
-        return std::make_unique<CollectingJsonInitConsumer>(&compiler.getASTContext(), classes);
-    }
-};
 
 class CollectingJsonInitConsumer : public clang::ASTConsumer {
 private:
@@ -116,27 +102,57 @@ public:
     }
 };
 
+// Custom action that collects class information
+class CollectingJsonInitAction : public clang::ASTFrontendAction {
+private:
+    std::vector<ClassInfo>* classes;
+    
+public:
+    CollectingJsonInitAction(std::vector<ClassInfo>* classContainer) 
+        : classes(classContainer) {}
+    
+    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
+        clang::CompilerInstance& compiler, 
+        llvm::StringRef file) override {
+        
+        return std::make_unique<CollectingJsonInitConsumer>(&compiler.getASTContext(), classes);
+    }
+};
+
+
+// Factory class for creating actions
+class CollectingActionFactory : public clang::tooling::FrontendActionFactory {
+private:
+    std::vector<ClassInfo>* classes;
+
+public:
+    CollectingActionFactory(std::vector<ClassInfo>* classContainer)
+        : classes(classContainer) {}
+
+    std::unique_ptr<clang::FrontendAction> create() override {
+        return std::make_unique<CollectingJsonInitAction>(classes);
+    }
+};
+
 int main(int argc, const char** argv) {
     auto expectedParser = CommonOptionsParser::create(argc, argv, JsonInitCategory);
     if (!expectedParser) {
         llvm::errs() << expectedParser.takeError();
         return 1;
     }
-    
+
     CommonOptionsParser& optionsParser = expectedParser.get();
-    
+
     std::vector<ClassInfo> allClasses;
-    
+
     // Process each source file
     ClangTool tool(optionsParser.getCompilations(), optionsParser.getSourcePathList());
-    
+
     // Create action factory that collects class information
-    auto actionFactory = [&allClasses](){ 
-        return std::make_unique<CollectingJsonInitAction>(&allClasses); 
-    };
-    
+    auto actionFactory = std::make_unique<CollectingActionFactory>(&allClasses);
+
     // Run the tool
-    int result = tool.run(newFrontendActionFactory(actionFactory).get());
+    int result = tool.run(actionFactory.get());
     if (result != 0) {
         fmt::print("Error running clang tool\n");
         return result;

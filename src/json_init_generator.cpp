@@ -1,7 +1,11 @@
+
 #include "json_init_generator.hpp"
+
 #include <fmt/core.h>
-#include <fstream>
+
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 // JsonInitVisitor Implementation
 JsonInitVisitor::JsonInitVisitor(clang::ASTContext* ctx) : context(ctx) {}
@@ -433,7 +437,7 @@ void CodeGenerator::generateClassFiles(const ClassInfo& classInfo, const std::st
             fmt::print("    - {}: {}{}\n", param.name, param.type, special);
         }
     }
-}fmt::print("Generated files for class {}:\n", className);
+    fmt::print("Generated files for class {}:\n", className);
     fmt::print("  - {}\n", headerPath);
     fmt::print("  - {}\n", implPath);
     fmt::print("  - {}\n", configPath);

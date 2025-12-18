@@ -1,15 +1,20 @@
+
 #include "memory_manager.hpp"
+
 #include <fmt/core.h>
+
 #include <algorithm>
+#include <bit>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <set>
-#include <bit>
 
 // Helper functions
 static size_t nextPowerOf2(size_t n) {
     if (n <= 1) return 1;
-    return 1ULL << (64 - std::countl_zero(n - 1));
+    //return 1ULL << (64 - std::countl_zero(n - 1));
+    return 1ULL << (64 - __builtin_clz(n - 1));
 }
 
 // MemoryPool implementation

@@ -1,6 +1,9 @@
+
 #include "scheduler.hpp"
 #include "object.hpp"
+
 #include <fmt/core.h>
+
 #include <chrono>
 #include <thread>
 
@@ -60,7 +63,7 @@ int main() {
         
         // Schedule some tasks
         for (int i = 1; i <= 3; ++i) {
-            mainScheduler->schedule(simpleTask, i);
+            mainScheduler->schedule([&i](){ simpleTask(i); });
         }
         
         fmt::print("Scheduled 3 tasks\n");
@@ -77,8 +80,8 @@ int main() {
         bgScheduler->display();
         
         // Prepare tasks that return values
-        auto future1 = bgScheduler->prepare(computeValue, 5);
-        auto future2 = bgScheduler->prepare(processString, std::string("Hello"));
+        auto future1 = bgScheduler->prepare([]() -> int { return computeValue(5); });
+        auto future2 = bgScheduler->prepare([]() -> std::string { return processString("Hello"); });
         
         fmt::print("Tasks prepared on background scheduler\n");
         bgScheduler->display();

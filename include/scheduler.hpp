@@ -1,29 +1,26 @@
 #pragma once
 
 #include "object.hpp"
-#include <functional>
-#include <queue>
-#include <future>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
+#include "task.hpp"
 #include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <future>
 #include <memory>
-
-// Forward declaration for task types
-using Task = std::function<void()>;
-
-template<typename T>
-using TaskWithResult = std::function<T()>;
+#include <mutex>
+#include <queue>
+#include <thread>
 
 class Scheduler : public Object {
 private:
     std::queue<Task> taskQueue;
     std::thread workerThread;
-    std::mutex queueMutex;
+    mutable std::mutex queueMutex;
     std::condition_variable condition;
+    std::condition_variable completionCondition;
     std::atomic<bool> stop;
-    
+    std::atomic<size_t> activeTasks;
+
     // Worker thread function
     void worker();
     
@@ -42,57 +39,39 @@ public:
     std::string getType() const override;
     void display() const override;
     
-    // Delete copy constructor and assignment operator
-    Scheduler(const Scheduler&) = delete;
-    Scheduler& operator=(const Scheduler&) = delete;
-    
     // Schedule a function for asynchronous execution (fire-and-forget)
-    void schedule(Task task);
-    
-    // Schedule a function with parameters (fire-and-forget)
     template<typename Func, typename... Args>
     void schedule(Func&& func, Args&&... args) {
-        auto task = [func = std::forward<Func>(func), args...]() mutable {
-            func(args...);
-        };
-        schedule(std::move(task));
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+
+            if (stop.load()) {
+                //fmt::print("Warning: Scheduler is shutting down, task rejected\n");
+                return;
+            }
+
+            taskQueue.emplace(std::forward<Func>(func), std::forward<Args>(args)...);
+        }
+        condition.notify_one();
     }
     
     // Prepare a function for execution and return a future for the result
-    template<typename Func>
-    auto prepare(Func&& func) -> std::future<decltype(func())> {
-        using ReturnType = decltype(func());
-        
-        auto taskPtr = std::make_shared<std::packaged_task<ReturnType()>>(
-            std::forward<Func>(func)
-        );
-        
-        std::future<ReturnType> result = taskPtr->get_future();
-        
-        schedule([taskPtr]() {
-            (*taskPtr)();
-        });
-        
-        return result;
-    }
-    
-    // Prepare a function with parameters and return a future for the result
     template<typename Func, typename... Args>
-    auto prepare(Func&& func, Args&&... args) -> std::future<decltype(func(args...))> {
-        using ReturnType = decltype(func(args...));
-        
+    auto prepare(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<Func, Args...>> {
+        using ReturnType = std::invoke_result_t<Func, Args...>;
+
         auto taskPtr = std::make_shared<std::packaged_task<ReturnType()>>(
             [func = std::forward<Func>(func), args...]() mutable {
                 return func(args...);
             }
         );
-        
+
         std::future<ReturnType> result = taskPtr->get_future();
-        
+
         schedule([taskPtr]() {
             (*taskPtr)();
         });
-        
+
         return result;
     }
     
