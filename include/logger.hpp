@@ -83,8 +83,8 @@ public:
 private:
     Scheduler scheduler;
     std::vector<std::shared_ptr<LogEndpoint>> endpoints;
-    std::string format;
     std::string moduleName;
+    std::string format;
 
     // Buffering and flushing configuration
     std::vector<std::string> buffer;

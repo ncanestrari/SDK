@@ -190,24 +190,59 @@ std::unique_ptr<clang::ASTConsumer> JsonInitAction::CreateASTConsumer(
 }
 
 // CodeGenerator Implementation
-CodeGenerator::CodeGenerator(const std::vector<ClassInfo>& classInfos) : classes(classInfos) {}
+CodeGenerator::CodeGenerator(const std::vector<ClassInfo>& classInfos, const std::string& headerFile)
+    : classes(classInfos), sourceHeaderFile(headerFile) {}
 
 std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& param, int index) {
     std::string nodeAccess = fmt::format("node->getChild(\"{}\")", param.name);
     std::string varName = fmt::format("param{}", index);
-    
+
+    // Remove const and & from type for local variable declaration
+    std::string localType = param.type;
+    size_t constPos = localType.find("const ");
+    if (constPos != std::string::npos) {
+        localType.erase(constPos, 6);  // Remove "const "
+    }
+    size_t refPos = localType.find('&');
+    if (refPos != std::string::npos) {
+        localType.erase(refPos, 1);  // Remove &
+    }
+    // Trim whitespace
+    localType.erase(0, localType.find_first_not_of(" \t"));
+    localType.erase(localType.find_last_not_of(" \t") + 1);
+
     if (param.isDerivedFromObject && (param.isPointer || param.isReference)) {
         // Object pointer/reference from registry
-        return fmt::format(
-            "    {} {};\n"
-            "    if (auto {}Node = {}) {{\n"
-            "        if ({}Node->type == JsonType::STRING) {{\n"
-            "            auto obj = ObjectRegistry::getInstance().getObject({}Node->stringValue);\n"
-            "            {} = std::dynamic_pointer_cast<{}>(obj);\n"
-            "        }}\n"
-            "    }}\n",
-            param.type, varName, param.name, nodeAccess, param.name, param.name, varName, param.baseType
-        );
+        // Check if it's a raw pointer or shared_ptr
+        bool isRawPointer = (localType.find("std::shared_ptr") == std::string::npos &&
+                            localType.find("*") != std::string::npos);
+
+        if (isRawPointer) {
+            // Raw pointer - use .get() on the shared_ptr
+            return fmt::format(
+                "    {} {} = nullptr;\n"
+                "    if (auto {}Node = {}) {{\n"
+                "        if ({}Node->type == JsonType::STRING) {{\n"
+                "            auto obj = ObjectRegistry::getInstance().getObject({}Node->stringValue);\n"
+                "            auto typedObj = std::dynamic_pointer_cast<{}>(obj);\n"
+                "            {} = typedObj ? typedObj.get() : nullptr;\n"
+                "        }}\n"
+                "    }}\n",
+                localType, varName, param.name, nodeAccess, param.name, param.name, param.baseType, varName
+            );
+        } else {
+            // shared_ptr - direct cast
+            return fmt::format(
+                "    {} {} = nullptr;\n"
+                "    if (auto {}Node = {}) {{\n"
+                "        if ({}Node->type == JsonType::STRING) {{\n"
+                "            auto obj = ObjectRegistry::getInstance().getObject({}Node->stringValue);\n"
+                "            {} = std::dynamic_pointer_cast<{}>(obj);\n"
+                "        }}\n"
+                "    }}\n",
+                localType, varName, param.name, nodeAccess, param.name, param.name, varName, param.baseType
+            );
+        }
     } else if (param.type.find("std::string") != std::string::npos) {
         // String parameter
         return fmt::format(
@@ -217,9 +252,9 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
             "            {} = {}Node->stringValue;\n"
             "        }}\n"
             "    }}\n",
-            param.type, varName, param.name, nodeAccess, param.name, varName, param.name
+            localType, varName, param.name, nodeAccess, param.name, varName, param.name
         );
-    } else if (param.type.find("int") != std::string::npos || 
+    } else if (param.type.find("int") != std::string::npos ||
                param.type.find("long") != std::string::npos ||
                param.type.find("short") != std::string::npos) {
         // Integer parameter
@@ -230,9 +265,9 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
             "            {} = static_cast<{}>({}Node->numberValue);\n"
             "        }}\n"
             "    }}\n",
-            param.type, varName, param.name, nodeAccess, param.name, varName, param.type, param.name
+            localType, varName, param.name, nodeAccess, param.name, varName, localType, param.name
         );
-    } else if (param.type.find("double") != std::string::npos || 
+    } else if (param.type.find("double") != std::string::npos ||
                param.type.find("float") != std::string::npos) {
         // Floating point parameter
         return fmt::format(
@@ -242,7 +277,7 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
             "            {} = static_cast<{}>({}Node->numberValue);\n"
             "        }}\n"
             "    }}\n",
-            param.type, varName, param.name, nodeAccess, param.name, varName, param.type, param.name
+            localType, varName, param.name, nodeAccess, param.name, varName, localType, param.name
         );
     } else if (param.type.find("bool") != std::string::npos) {
         // Boolean parameter
@@ -253,7 +288,7 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
             "            {} = {}Node->booleanValue;\n"
             "        }}\n"
             "    }}\n",
-            param.type, varName, param.name, nodeAccess, param.name, varName, param.name
+            localType, varName, param.name, nodeAccess, param.name, varName, param.name
         );
     } else {
         // Generic/unknown type
@@ -276,11 +311,11 @@ std::string CodeGenerator::generateInitFunction(const ClassInfo& classInfo) {
     }
     
     std::string result = fmt::format(
-        "{} createFromJson(JsonNodePtr node) {{\n"
+        "{} create{}FromJson(JsonNodePtr node) {{\n"
         "    if (!node || node->type != JsonType::OBJECT) {{\n"
         "        throw std::runtime_error(\"Expected object node for {} creation\");\n"
         "    }}\n\n",
-        classInfo.fullName, classInfo.name
+        classInfo.fullName, classInfo.name, classInfo.name
     );
     
     // Generate parameter extraction code
@@ -339,26 +374,27 @@ std::string CodeGenerator::generateExampleJson(const ClassInfo& classInfo) {
 
 std::string CodeGenerator::generateClassHeader(const ClassInfo& classInfo) {
     std::string result = "#pragma once\n\n";
-    result += "#include \"JsonNode.h\"\n\n";
+    result += "#include \"json_node.hpp\"\n\n";
     
     // Forward declaration if needed
     result += fmt::format("class {};\n\n", classInfo.name);
-    
+
     // Function declaration - now returns object instead of void
-    result += fmt::format("{} createFromJson(JsonNodePtr node);\n", classInfo.fullName);
+    result += fmt::format("{} create{}FromJson(JsonNodePtr node);\n", classInfo.fullName, classInfo.name);
     
     return result;
 }
 
 std::string CodeGenerator::generateClassImplementation(const ClassInfo& classInfo) {
-    std::string result = fmt::format("#include \"{}_initializer.hpp\"\n", classInfo.name);
+    std::string lowerClassName = classInfo.name;
+    std::transform(lowerClassName.begin(), lowerClassName.end(), lowerClassName.begin(), ::tolower);
+    std::string result = fmt::format("#include \"{}_initializer.hpp\"\n", lowerClassName);
     result += "#include \"object.hpp\"\n";
     result += "#include <stdexcept>\n";
     result += "#include <memory>\n\n";
-    
-    // Include the actual class header (assuming it exists)
-    result += fmt::format("// Include your class header here\n");
-    result += fmt::format("// #include \"{}.h\"\n\n", classInfo.name);
+
+    // Include the actual class header
+    result += fmt::format("#include \"{}\"\n\n", sourceHeaderFile);
     
     // Generate the creation function
     result += generateInitFunction(classInfo);
@@ -466,7 +502,7 @@ void CodeGenerator::generateHeader(const std::string& headerPath) {
     }
     
     file << "#pragma once\n\n";
-    file << "#include \"JsonNode.h\"\n\n";
+    file << "#include \"json_node.hpp\"\n\n";
     
     // Include all individual headers
     for (const auto& classInfo : classes) {

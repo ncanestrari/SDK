@@ -54,14 +54,14 @@ public:
         fmt::print("Successfully processed file: {}\n", filename);
     }
     
-    void generateOutput(const std::string& outputDir) {
+    void generateOutput(const std::string& outputDir, const std::string& sourceHeaderFile) {
         if (collectedClasses.empty()) {
             fmt::print("No annotated classes found.\n");
             return;
         }
-        
+
         try {
-            CodeGenerator generator(collectedClasses);
+            CodeGenerator generator(collectedClasses, sourceHeaderFile);
             generator.generateFiles(outputDir);
             
             fmt::print("Generated files in directory: {}/\n", outputDir);
@@ -163,9 +163,24 @@ int main(int argc, const char** argv) {
         fmt::print("No classes with 'initialize' annotation found.\n");
         return 0;
     }
-    
+
+    // Extract the source header file name
+    const auto& sourcePaths = optionsParser.getSourcePathList();
+    if (sourcePaths.empty()) {
+        fmt::print("No source files provided.\n");
+        return 1;
+    }
+
+    // Use the first source file as the header to include
+    std::string sourceHeaderFile = sourcePaths[0];
+    // Extract just the filename from the path
+    size_t lastSlash = sourceHeaderFile.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        sourceHeaderFile = sourceHeaderFile.substr(lastSlash + 1);
+    }
+
     try {
-        CodeGenerator generator(allClasses);
+        CodeGenerator generator(allClasses, sourceHeaderFile);
         generator.generateFiles(OutputDir.getValue());
         
         fmt::print("Generated files in directory: {}/\n", OutputDir.getValue());

@@ -142,13 +142,10 @@ std::string Logger::formatMessage(LogLevel level, const std::string& message) {
 
     // Get current time
     auto now = std::chrono::system_clock::now();
-    auto timeT = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
     // Format date/time
-    std::string dateStr = fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d}",
-                                      fmt::localtime(timeT), ms.count());
+    std::string dateStr = fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d}", now, ms.count());
 
     result = fmt::format(format, dateStr, moduleName, levelToString(level), message);
 

@@ -2,28 +2,25 @@
 
 #include <string>
 #include <memory>
-
-// Base Object class (assumed to exist in your codebase)
-class Object {
-public:
-    virtual ~Object() = default;
-    virtual std::string getName() const = 0;
-};
+#include "object.hpp"
 
 // Example derived classes
 class Renderer : public Object {
 public:
-    std::string getName() const override { return "Renderer"; }
+    std::string getType() const override { return "Renderer"; }
+    void display() const override {}
 };
 
 class AudioSystem : public Object {
 public:
-    std::string getName() const override { return "AudioSystem"; }
+    std::string getType() const override { return "AudioSystem"; }
+    void display() const override {}
 };
 
 class Transform : public Object {
 public:
-    std::string getName() const override { return "Transform"; }
+    std::string getType() const override { return "Transform"; }
+    void display() const override {}
 };
 
 // Annotated classes for code generation

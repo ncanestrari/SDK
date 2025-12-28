@@ -2,38 +2,18 @@
 #include "configuration_initializer.hpp"
 #include "playerstats_initializer.hpp"
 #include "json_init_example.hpp"
-#include "json_node.h"
+#include "json_node.hpp"
 #include <fmt/core.h>
 #include <unordered_map>
 
-// Mock ObjectRegistry for testing
-class ObjectRegistry {
-private:
-    std::unordered_map<std::string, std::shared_ptr<Object>> objects;
-    
-    ObjectRegistry() {
-        // Add some test objects
-        objects["MainRenderer"] = std::make_shared<Renderer>();
-        objects["PlayerTransform"] = std::make_shared<Transform>();
-        objects["GameAudio"] = std::make_shared<AudioSystem>();
-        objects["UITransform"] = std::make_shared<Transform>();
-    }
-
-public:
-    static ObjectRegistry& getInstance() {
-        static ObjectRegistry instance;
-        return instance;
-    }
-    
-    std::shared_ptr<Object> getObject(const std::string& name) {
-        auto it = objects.find(name);
-        return (it != objects.end()) ? it->second : nullptr;
-    }
-    
-    void registerObject(const std::string& name, std::shared_ptr<Object> obj) {
-        objects[name] = obj;
-    }
-};
+// Initialize ObjectRegistry with test objects
+void initializeTestObjects() {
+    auto& registry = ObjectRegistry::getInstance();
+    registry.registerObject("MainRenderer", std::make_shared<Renderer>());
+    registry.registerObject("PlayerTransform", std::make_shared<Transform>());
+    registry.registerObject("GameAudio", std::make_shared<AudioSystem>());
+    registry.registerObject("UITransform", std::make_shared<Transform>());
+}
 
 // Mock file reader for testing
 std::unordered_map<std::string, std::string> testJsonFiles = {
@@ -85,16 +65,16 @@ void testGameEntityCreation() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(testJsonFiles["gameentity.json"]);
         
-        GameEntity entity = createFromJson(node);
+        GameEntity entity = createGameEntityFromJson(node);
         
         fmt::print("GameEntity created successfully:\n");
         fmt::print("  name: {}\n", entity.getName());
         fmt::print("  health: {}\n", entity.getHealth());
         fmt::print("  speed: {}\n", entity.getSpeed());
         fmt::print("  isActive: {}\n", entity.getIsActive() ? "true" : "false");
-        fmt::print("  renderer: {}\n", entity.getRenderer() ? entity.getRenderer()->getName() : "null");
-        fmt::print("  transform: {}\n", entity.getTransform() ? entity.getTransform()->getName() : "null");
-        fmt::print("  audioSystem: {}\n", entity.getAudioSystem() ? entity.getAudioSystem()->getName() : "null");
+        fmt::print("  renderer: {}\n", entity.getRenderer() ? entity.getRenderer()->getType() : "null");
+        fmt::print("  transform: {}\n", entity.getTransform() ? entity.getTransform()->getType() : "null");
+        fmt::print("  audioSystem: {}\n", entity.getAudioSystem() ? entity.getAudioSystem()->getType() : "null");
         
     } catch (const std::exception& e) {
         fmt::print("Error: {}\n", e.what());
@@ -108,7 +88,7 @@ void testConfigurationCreation() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(testJsonFiles["config.json"]);
         
-        Configuration config = createFromJson(node);
+        Configuration config = createConfigurationFromJson(node);
         
         fmt::print("Configuration created successfully:\n");
         fmt::print("  appName: {}\n", config.getAppName());
@@ -129,7 +109,7 @@ void testPlayerStatsCreation() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(testJsonFiles["playerstats.json"]);
         
-        PlayerStats stats = createFromJson(node);
+        PlayerStats stats = createPlayerStatsFromJson(node);
         
         fmt::print("PlayerStats created successfully:\n");
         fmt::print("  playerName: {}\n", stats.getPlayerName());
@@ -137,7 +117,7 @@ void testPlayerStatsCreation() {
         fmt::print("  experience: {}\n", stats.getExperience());
         fmt::print("  accuracy: {}\n", stats.getAccuracy());
         fmt::print("  isOnline: {}\n", stats.getIsOnline() ? "true" : "false");
-        fmt::print("  position: {}\n", stats.getPosition() ? stats.getPosition()->getName() : "null");
+        fmt::print("  position: {}\n", stats.getPosition() ? stats.getPosition()->getType() : "null");
         
     } catch (const std::exception& e) {
         fmt::print("Error: {}\n", e.what());
@@ -151,7 +131,7 @@ void testPlayerStatsSimple() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(testJsonFiles["playerstats_simple.json"]);
         
-        PlayerStats stats = createFromJson(node);
+        PlayerStats stats = createPlayerStatsFromJson(node);
         
         fmt::print("PlayerStats (simple) created successfully:\n");
         fmt::print("  playerName: {}\n", stats.getPlayerName());
@@ -159,7 +139,7 @@ void testPlayerStatsSimple() {
         fmt::print("  experience: {} (default)\n", stats.getExperience());
         fmt::print("  accuracy: {} (default)\n", stats.getAccuracy());
         fmt::print("  isOnline: {} (default)\n", stats.getIsOnline() ? "true" : "false");
-        fmt::print("  position: {} (default)\n", stats.getPosition() ? stats.getPosition()->getName() : "null");
+        fmt::print("  position: {} (default)\n", stats.getPosition() ? stats.getPosition()->getType() : "null");
         
     } catch (const std::exception& e) {
         fmt::print("Error: {}\n", e.what());
@@ -204,7 +184,7 @@ void testWithIncludeDirectives() {
         // Extract and create objects from included JSON
         JsonNodePtr entityNode = rootNode->getChild("entity");
         if (entityNode) {
-            GameEntity entity = createFromJson(entityNode);
+            GameEntity entity = createGameEntityFromJson(entityNode);
             fmt::print("\nCreated entity from included JSON:\n");
             fmt::print("  name: {}\n", entity.getName());
             fmt::print("  health: {}\n", entity.getHealth());
@@ -213,7 +193,7 @@ void testWithIncludeDirectives() {
         
         JsonNodePtr settingsNode = rootNode->getChild("settings");
         if (settingsNode) {
-            Configuration config = createFromJson(settingsNode);
+            Configuration config = createConfigurationFromJson(settingsNode);
             fmt::print("\nCreated config from included JSON:\n");
             fmt::print("  appName: {}\n", config.getAppName());
             fmt::print("  maxConnections: {}\n", config.getMaxConnections());
@@ -221,7 +201,7 @@ void testWithIncludeDirectives() {
         
         JsonNodePtr playerNode = rootNode->getChild("player");
         if (playerNode) {
-            PlayerStats stats = createFromJson(playerNode);
+            PlayerStats stats = createPlayerStatsFromJson(playerNode);
             fmt::print("\nCreated player stats from included JSON:\n");
             fmt::print("  playerName: {}\n", stats.getPlayerName());
             fmt::print("  level: {}\n", stats.getLevel());
@@ -249,7 +229,7 @@ void testErrorHandling() {
         JsonNodePtr node = parser.parse(invalidJson);
         
         fmt::print("Testing with invalid health value (string instead of number):\n");
-        GameEntity entity = createFromJson(node);
+        GameEntity entity = createGameEntityFromJson(node);
         
         fmt::print("Entity created with defaults for invalid fields:\n");
         fmt::print("  name: {}\n", entity.getName());
@@ -271,7 +251,7 @@ void testErrorHandling() {
         JsonNodePtr node = parser.parse(partialJson);
         
         fmt::print("\nTesting with missing fields:\n");
-        GameEntity entity = createFromJson(node);
+        GameEntity entity = createGameEntityFromJson(node);
         
         fmt::print("Entity created with defaults for missing fields:\n");
         fmt::print("  name: {}\n", entity.getName());
@@ -306,13 +286,13 @@ void demonstrateObjectRegistryUsage() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(customJson);
         
-        GameEntity entity = createFromJson(node);
+        GameEntity entity = createGameEntityFromJson(node);
         
         fmt::print("Created entity with custom registered objects:\n");
         fmt::print("  name: {}\n", entity.getName());
-        fmt::print("  renderer: {}\n", entity.getRenderer() ? entity.getRenderer()->getName() : "null");
-        fmt::print("  transform: {}\n", entity.getTransform() ? entity.getTransform()->getName() : "null");
-        fmt::print("  audioSystem: {}\n", entity.getAudioSystem() ? entity.getAudioSystem()->getName() : "null");
+        fmt::print("  renderer: {}\n", entity.getRenderer() ? entity.getRenderer()->getType() : "null");
+        fmt::print("  transform: {}\n", entity.getTransform() ? entity.getTransform()->getType() : "null");
+        fmt::print("  audioSystem: {}\n", entity.getAudioSystem() ? entity.getAudioSystem()->getType() : "null");
         
     } catch (const std::exception& e) {
         fmt::print("Error: {}\n", e.what());
@@ -331,11 +311,11 @@ void demonstrateObjectRegistryUsage() {
         JsonParser parser(mockFileReader);
         JsonNodePtr node = parser.parse(missingObjectJson);
         
-        GameEntity entity = createFromJson(node);
+        GameEntity entity = createGameEntityFromJson(node);
         
         fmt::print("\nTesting with non-existent object reference:\n");
         fmt::print("  name: {}\n", entity.getName());
-        fmt::print("  renderer: {} (should be null)\n", entity.getRenderer() ? entity.getRenderer()->getName() : "null");
+        fmt::print("  renderer: {} (should be null)\n", entity.getRenderer() ? entity.getRenderer()->getType() : "null");
         
     } catch (const std::exception& e) {
         fmt::print("Error: {}\n", e.what());
@@ -397,7 +377,7 @@ void testComplexConfiguration() {
                 for (size_t i = 0; i < entitiesNode->elements.size(); ++i) {
                     JsonNodePtr entityNode = entitiesNode->getElement(i);
                     if (entityNode) {
-                        GameEntity entity = createFromJson(entityNode);
+                        GameEntity entity = createGameEntityFromJson(entityNode);
                         fmt::print("  Entity {}: {} (health: {})\n", 
                                  i, entity.getName(), entity.getHealth());
                     }
@@ -407,14 +387,14 @@ void testComplexConfiguration() {
             // Test nested configuration
             JsonNodePtr settingsNode = gameNode->getChild("settings");
             if (settingsNode) {
-                Configuration config = createFromJson(settingsNode);
+                Configuration config = createConfigurationFromJson(settingsNode);
                 fmt::print("\nNested configuration: {}\n", config.getAppName());
             }
             
             // Test nested player stats
             JsonNodePtr playersNode = gameNode->getChild("players");
             if (playersNode) {
-                PlayerStats stats = createFromJson(playersNode);
+                PlayerStats stats = createPlayerStatsFromJson(playersNode);
                 fmt::print("Nested player: {} (level {})\n", 
                          stats.getPlayerName(), stats.getLevel());
             }
@@ -438,9 +418,9 @@ void printSummaryAndUsage() {
     
     fmt::print("\n=== New API Usage Examples ===\n");
     fmt::print("// Constructor-based creation (NEW)\n");
-    fmt::print("GameEntity entity = createFromJson(node);\n");
-    fmt::print("Configuration config = createFromJson(node);\n");
-    fmt::print("PlayerStats stats = createFromJson(node);\n");
+    fmt::print("GameEntity entity = createGameEntityFromJson(node);\n");
+    fmt::print("Configuration config = createConfigurationFromJson(node);\n");
+    fmt::print("PlayerStats stats = createPlayerStatsFromJson(node);\n");
     fmt::print("\n");
     fmt::print("// Instead of field-based initialization (OLD)\n");
     fmt::print("// GameEntity entity;\n");
@@ -458,7 +438,10 @@ void printSummaryAndUsage() {
 int main() {
     fmt::print("Testing Generated JSON Constructor-Based Initialization Code\n");
     fmt::print("============================================================\n");
-    
+
+    // Initialize test objects in the registry
+    initializeTestObjects();
+
     // Test each class creation
     testGameEntityCreation();
     testConfigurationCreation();

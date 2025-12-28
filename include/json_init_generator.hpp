@@ -85,16 +85,17 @@ public:
 class CodeGenerator {
 private:
     std::vector<ClassInfo> classes;
-    
+    std::string sourceHeaderFile;
+
     std::string generateInitFunction(const ClassInfo& classInfo);
     std::string generateParameterInitialization(const ParameterInfo& param, int index);
     std::string generateExampleJson(const ClassInfo& classInfo);
     std::string generateJsonValue(const ParameterInfo& param, int indent = 1);
     std::string generateClassHeader(const ClassInfo& classInfo);
     std::string generateClassImplementation(const ClassInfo& classInfo);
-    
+
 public:
-    explicit CodeGenerator(const std::vector<ClassInfo>& classInfos);
+    CodeGenerator(const std::vector<ClassInfo>& classInfos, const std::string& headerFile);
     
     void generateFiles(const std::string& outputDir);
     void generateClassFiles(const ClassInfo& classInfo, const std::string& outputDir);
