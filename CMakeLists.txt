@@ -112,6 +112,7 @@ add_library(sdk
     src/object.cpp
     src/scheduler.cpp
     src/logger.cpp
+    src/clock.cpp
 )
 
 target_include_directories(sdk PUBLIC 
@@ -191,6 +192,15 @@ add_executable(logger_example
 )
 
 target_link_libraries(logger_example
+    sdk
+    fmt::fmt
+)
+
+add_executable(clock_example
+    example/clock_example.cpp
+)
+
+target_link_libraries(clock_example
     sdk
     fmt::fmt
 )

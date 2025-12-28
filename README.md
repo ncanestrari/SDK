@@ -43,7 +43,30 @@ A singleton registry for managing named objects with runtime type identification
 - Type-safe object retrieval
 - Registry introspection (list all objects, check existence)
 
-### 5. JSON Initialization Code Generator
+### 5. Logger System
+A flexible asynchronous logging system with multiple endpoints and configurable formatting.
+
+- **Asynchronous logging** using the task scheduler
+- **Multiple endpoints** (stdout, file, socket, logger chaining)
+- **Configurable format** with placeholders for date, module, level, and message
+- **Log levels** (DEBUG, INFO, LOG, WARN, ERROR) with runtime filtering
+- **Buffered output** with configurable flush triggers (byte limit and time interval)
+- Thread-safe operations
+
+### 6. Clock System
+A controllable timing system that can replace `std::steady_clock` with support for time scaling and simulation.
+
+- **RealTimeClock** - Standard real-time clock
+- **SimulatorClock** - Controllable clock with three modes:
+  - **REALTIME** - Follow real time with configurable speed (0.1x to 100x+)
+  - **MANUAL** - Deterministic time control for testing
+  - **PAUSED** - Freeze time for debugging
+- **GlobalClock** - Singleton interface for application-wide time control
+- **ScopedClockOverride** - Temporarily change clock behavior
+- Thread-safe operations
+- Drop-in replacement for std::chrono clocks
+
+### 7. JSON Initialization Code Generator
 A Clang-based tool that automatically generates JSON initialization code for annotated C++ classes.
 
 - **Automatic code generation** from class annotations
@@ -167,6 +190,72 @@ if (obj) {
 }
 ```
 
+### Logger
+
+```cpp
+#include "logger.hpp"
+
+// Create logger with module name
+auto logger = std::make_shared<Logger>("MyApp");
+
+// Add endpoints
+logger->addEndpoint(std::make_shared<StdoutEndpoint>());
+logger->addEndpoint(std::make_shared<FileEndpoint>("app.log"));
+
+// Configure
+logger->setFormat("{} - {} - [{}] {}\n");
+logger->setFlushByteLimit(1024);  // Flush every 1KB
+logger->setFlushTimeInterval(std::chrono::seconds(5));  // Or every 5s
+logger->setLevel(static_cast<int>(Logger::LogLevel::INFO));
+
+// Log messages
+logger->info("Application started");
+logger->warn("Low memory");
+logger->error("Failed to load config");
+
+// Template formatting
+logger->info("User {} logged in", username);
+logger->warn("Retry attempt {}/{}", current, max);
+```
+
+### Clock System
+
+```cpp
+#include "clock.hpp"
+
+// Use real-time clock (default)
+GlobalClock::useRealTime();
+auto start = GlobalClock::now();
+doWork();
+auto elapsed = GlobalClock::now() - start;
+
+// Use simulator clock with 2x speed
+GlobalClock::useSimulator(2.0);
+std::this_thread::sleep_for(std::chrono::milliseconds(100));
+// Time advances by 200ms
+
+// Manual time control for testing
+auto* sim = GlobalClock::getSimulator();
+sim->setMode(SimulatorClock::Mode::MANUAL);
+sim->reset();
+sim->advance(std::chrono::seconds(10));  // Jump 10 seconds forward
+
+// Pause/resume time
+sim->pause();
+// ... time is frozen
+sim->resume();
+
+// Change time scale dynamically
+sim->setTimeScale(0.1);   // Slow motion
+sim->setTimeScale(100.0); // Fast forward
+
+// Temporary clock override
+{
+    ScopedClockOverride override(std::make_unique<SimulatorClock>(10.0));
+    // All code here runs with 10x speed
+} // Automatically restored
+```
+
 ### JSON Initialization Code Generator
 
 #### Step 1: Annotate your classes
@@ -242,22 +331,26 @@ Object-derived pointers (like `renderer`) are automatically resolved from the Ob
 │   ├── memory_manager.hpp
 │   ├── object.hpp
 │   ├── scheduler.hpp
+│   ├── logger.hpp
+│   ├── clock.hpp
 │   └── json_init_generator.hpp
 ├── src/                  # Implementation files
 │   ├── json_node.cpp
 │   ├── memory_manager.cpp
 │   ├── object.cpp
 │   ├── scheduler.cpp
+│   ├── logger.cpp
+│   ├── clock.cpp
 │   ├── json_init_generator.cpp
 │   └── json_init_generator_main.cpp
 ├── example/              # Example usage
 │   ├── json_node_example.cpp
-│   ├── memory_manager_example.cpp
 │   ├── scheduler_example.cpp
+│   ├── logger_example.cpp
+│   ├── clock_example.cpp
 │   ├── json_init_example.hpp
 │   └── test_generated.cpp
 ├── CMakeLists.txt
-├── build_and_test.sh
 └── README.md
 ```
 
@@ -268,6 +361,9 @@ The build system creates the following targets:
 - `sdk` - Static library containing core functionality
 - `json_init_generator` - Code generation tool
 - `json_example` - JSON parser example
+- `scheduler_example` - Task scheduler example
+- `logger_example` - Logger system example
+- `clock_example` - Clock system example
 - `test_generated` - Test for generated initialization code
 
 ## Installation
