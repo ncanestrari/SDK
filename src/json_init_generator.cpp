@@ -60,19 +60,51 @@ bool JsonInitVisitor::isDerivedFromObject(clang::QualType type) {
 }
 
 std::string JsonInitVisitor::getFullTypeName(clang::QualType type) {
-    return type.getAsString(context->getPrintingPolicy());
+    // Strip qualifiers and check the underlying type
+    clang::QualType unqualType = type.getUnqualifiedType();
+    const clang::Type* typePtr = unqualType.getTypePtr();
+
+    // For record types (classes/structs), get the fully qualified name
+    if (const auto* recordType = typePtr->getAs<clang::RecordType>()) {
+        if (const auto* recordDecl = recordType->getDecl()) {
+            std::string qualifiedName = recordDecl->getQualifiedNameAsString();
+            if (!qualifiedName.empty() && qualifiedName.find("::") != std::string::npos) {
+                // Build the type with qualifiers
+                std::string result;
+                if (type.isConstQualified()) {
+                    result = "const ";
+                }
+                result += qualifiedName;
+                if (type->isPointerType()) {
+                    result += " *";
+                } else if (type->isLValueReferenceType()) {
+                    result += " &";
+                } else if (type->isRValueReferenceType()) {
+                    result += " &&";
+                }
+                return result;
+            }
+        }
+    }
+
+    // For other types, use printing policy
+    clang::PrintingPolicy policy = context->getPrintingPolicy();
+    policy.SuppressScope = 0;
+    policy.SuppressTagKeyword = 1;
+    return type.getAsString(policy);
 }
 
 std::string JsonInitVisitor::getBaseTypeName(clang::QualType type) {
     clang::QualType baseType = type.getCanonicalType();
-    
+
     if (baseType->isPointerType()) {
         baseType = baseType->getPointeeType();
     } else if (baseType->isReferenceType()) {
         baseType = baseType.getNonReferenceType();
     }
-    
-    return baseType.getAsString(context->getPrintingPolicy());
+
+    // Use getFullTypeName to get properly qualified name
+    return getFullTypeName(baseType);
 }
 
 ParameterInfo JsonInitVisitor::analyzeParameter(const clang::ParmVarDecl* param) {
@@ -108,6 +140,7 @@ ConstructorInfo JsonInitVisitor::analyzeConstructor(const clang::CXXConstructorD
     ConstructorInfo info;
     info.isDefault = constructor->isDefaultConstructor();
     info.isExplicit = constructor->isExplicit();
+    info.isDeleted = constructor->isDeleted();
     
     // Generate signature for debugging
     llvm::raw_string_ostream stream(info.signature);
@@ -132,16 +165,28 @@ const ConstructorInfo* ClassInfo::getBestConstructor() const {
     if (constructors.empty()) {
         return nullptr;
     }
-    
-    // Prefer non-default constructors with parameters
+
+    // Filter out deleted constructors
+    std::vector<const ConstructorInfo*> validCtors;
     for (const auto& ctor : constructors) {
-        if (!ctor.isDefault && !ctor.parameters.empty()) {
-            return &ctor;
+        if (!ctor.isDeleted) {
+            validCtors.push_back(&ctor);
         }
     }
-    
-    // Fall back to any constructor
-    return &constructors[0];
+
+    if (validCtors.empty()) {
+        return nullptr;
+    }
+
+    // Prefer non-default constructors with parameters
+    for (const auto* ctor : validCtors) {
+        if (!ctor->isDefault && !ctor->parameters.empty()) {
+            return ctor;
+        }
+    }
+
+    // Fall back to first valid constructor (likely the default constructor)
+    return validCtors[0];
 }
 
 bool JsonInitVisitor::VisitCXXRecordDecl(clang::CXXRecordDecl* decl) {
@@ -290,6 +335,43 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
             "    }}\n",
             localType, varName, param.name, nodeAccess, param.name, varName, param.name
         );
+    } else if (param.type.find("UnixAddress") != std::string::npos) {
+        // UnixAddress parameter - needs path string
+        return fmt::format(
+            "    std::string {}_path = \"\";\n"
+            "    if (auto {}Node = {}) {{\n"
+            "        if ({}Node->type == JsonType::STRING) {{\n"
+            "            {}_path = {}Node->stringValue;\n"
+            "        }}\n"
+            "    }}\n"
+            "    {} {}({}_path);\n",
+            param.name, param.name, nodeAccess, param.name, param.name, param.name,
+            localType, varName, param.name
+        );
+    } else if (param.type.find("InetAddress") != std::string::npos) {
+        // InetAddress parameter - needs host and port
+        return fmt::format(
+            "    std::string {}_host = \"\";\n"
+            "    uint16_t {}_port = 0;\n"
+            "    if (auto {}Node = {}) {{\n"
+            "        if ({}Node->type == JsonType::OBJECT) {{\n"
+            "            if (auto hostNode = {}Node->getChild(\"host\")) {{\n"
+            "                if (hostNode->type == JsonType::STRING) {{\n"
+            "                    {}_host = hostNode->stringValue;\n"
+            "                }}\n"
+            "            }}\n"
+            "            if (auto portNode = {}Node->getChild(\"port\")) {{\n"
+            "                if (portNode->type == JsonType::NUMBER) {{\n"
+            "                    {}_port = static_cast<uint16_t>(portNode->numberValue);\n"
+            "                }}\n"
+            "            }}\n"
+            "        }}\n"
+            "    }}\n"
+            "    {} {}({}_host, {}_port);\n",
+            param.name, param.name, param.name, nodeAccess, param.name, param.name, param.name,
+            param.name, param.name,
+            localType, varName, param.name, param.name
+        );
     } else {
         // Generic/unknown type
         return fmt::format(
@@ -375,13 +457,26 @@ std::string CodeGenerator::generateExampleJson(const ClassInfo& classInfo) {
 std::string CodeGenerator::generateClassHeader(const ClassInfo& classInfo) {
     std::string result = "#pragma once\n\n";
     result += "#include \"json_node.hpp\"\n\n";
-    
-    // Forward declaration if needed
-    result += fmt::format("class {};\n\n", classInfo.name);
+
+    // Extract namespace from fullName if present
+    std::string namespaceDecl;
+    std::string className = classInfo.name;
+    if (classInfo.fullName.find("::") != std::string::npos) {
+        size_t pos = classInfo.fullName.rfind("::");
+        namespaceDecl = classInfo.fullName.substr(0, pos);
+
+        // Add namespace declaration
+        result += fmt::format("namespace {} {{\n", namespaceDecl);
+        result += fmt::format("    class {};\n", className);
+        result += "}\n\n";
+    } else {
+        // No namespace, just forward declare
+        result += fmt::format("class {};\n\n", className);
+    }
 
     // Function declaration - now returns object instead of void
     result += fmt::format("{} create{}FromJson(JsonNodePtr node);\n", classInfo.fullName, classInfo.name);
-    
+
     return result;
 }
 

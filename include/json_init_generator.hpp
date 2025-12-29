@@ -30,6 +30,7 @@ struct ConstructorInfo {
     std::vector<ParameterInfo> parameters;
     bool isDefault;
     bool isExplicit;
+    bool isDeleted;
     std::string signature;
 };
 

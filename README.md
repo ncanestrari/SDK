@@ -66,7 +66,24 @@ A controllable timing system that can replace `std::steady_clock` with support f
 - Thread-safe operations
 - Drop-in replacement for std::chrono clocks
 
-### 7. JSON Initialization Code Generator
+### 7. Socket System
+A comprehensive socket abstraction supporting Unix domain and network sockets with multiple communication patterns.
+
+- **ISocket** - Base interface with send/receive operations
+- **Unix Domain Sockets**:
+  - **UnixStreamSocket** - Connection-oriented stream communication (SOCK_STREAM)
+  - **UnixDatagramSocket** - Connectionless datagram communication (SOCK_DGRAM)
+  - **UnixSeqPacketSocket** - Connection-oriented with message boundaries (SOCK_SEQPACKET)
+- **Network Sockets**:
+  - **TcpSocket** - TCP stream sockets with IPv4/IPv6 support
+  - **UdpSocket** - UDP datagram sockets with IPv4/IPv6 support
+  - **RawSocket** - Raw IP sockets for custom protocols
+- **Server Sockets** - Bind, listen, and accept for stream-oriented protocols
+- **Socket Options** - Timeout, non-blocking mode, broadcast, address reuse
+- Type-safe address handling (UnixAddress, InetAddress)
+- Move-only semantics for resource safety
+
+### 8. JSON Initialization Code Generator
 A Clang-based tool that automatically generates JSON initialization code for annotated C++ classes.
 
 - **Automatic code generation** from class annotations
@@ -256,6 +273,138 @@ sim->setTimeScale(100.0); // Fast forward
 } // Automatically restored
 ```
 
+### Socket System
+
+#### Unix Domain Stream Socket (client/server)
+
+```cpp
+#include "socket.hpp"
+
+// Server
+UnixStreamServerSocket server(UnixAddress{"/tmp/my_socket.sock"});
+server.bind();
+server.listen();
+
+auto client = server.accept();
+uint8_t buffer[256];
+auto received = client->receive(std::span<uint8_t>(buffer, sizeof(buffer)));
+
+// Client
+UnixStreamSocket client(UnixAddress{"/tmp/my_socket.sock"});
+client.connect();
+std::string msg = "Hello";
+client.send(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(msg.data()), msg.size()));
+```
+
+#### TCP Socket (client/server)
+
+```cpp
+#include "socket.hpp"
+
+// Server
+TcpServerSocket server(InetAddress{"0.0.0.0", 8080});
+server.bind();
+server.listen();
+
+auto client = server.accept();
+uint8_t buffer[1024];
+auto received = client->receive(std::span<uint8_t>(buffer, sizeof(buffer)));
+
+// Client
+TcpSocket client(InetAddress{"127.0.0.1", 8080});
+client.connect();
+std::string msg = "GET / HTTP/1.1\r\n\r\n";
+client.send(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(msg.data()), msg.size()));
+```
+
+#### UDP Socket (datagram)
+
+```cpp
+#include "socket.hpp"
+
+// Sender
+UdpSocket sender;
+std::string msg = "UDP message";
+sender.sendTo(
+    std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(msg.data()), msg.size()),
+    InetAddress{"127.0.0.1", 9090}
+);
+
+// Receiver
+UdpSocket receiver(InetAddress{"0.0.0.0", 9090});
+receiver.bind();
+
+uint8_t buffer[1024];
+InetAddress senderAddr{"", 0};
+auto received = receiver.receiveFrom(std::span<uint8_t>(buffer, sizeof(buffer)), senderAddr);
+```
+
+#### Unix Datagram Socket
+
+```cpp
+#include "socket.hpp"
+
+// Sender
+UnixDatagramSocket sender(UnixAddress{"/tmp/client.sock"});
+sender.bind();
+std::string msg = "Datagram";
+sender.sendTo(
+    std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(msg.data()), msg.size()),
+    UnixAddress{"/tmp/server.sock"}
+);
+
+// Receiver
+UnixDatagramSocket receiver(UnixAddress{"/tmp/server.sock"});
+receiver.bind();
+
+uint8_t buffer[256];
+UnixAddress senderAddr{""};
+auto received = receiver.receiveFrom(std::span<uint8_t>(buffer, sizeof(buffer)), senderAddr);
+```
+
+#### Sequenced Packet Socket (message boundaries preserved)
+
+```cpp
+#include "socket.hpp"
+
+// Server
+UnixSeqPacketServerSocket server(UnixAddress{"/tmp/seqpacket.sock"});
+server.bind();
+server.listen();
+
+auto client = server.accept();
+uint8_t buffer[256];
+// Each receive gets exactly one complete message
+auto msg1 = client->receive(std::span<uint8_t>(buffer, sizeof(buffer)));
+auto msg2 = client->receive(std::span<uint8_t>(buffer, sizeof(buffer)));
+
+// Client
+UnixSeqPacketSocket client(UnixAddress{"/tmp/seqpacket.sock"});
+client.connect();
+// Send two separate messages - boundaries preserved
+client.sendMessage(std::span<const uint8_t>(...));  // Message 1
+client.sendMessage(std::span<const uint8_t>(...));  // Message 2
+```
+
+#### Socket Options
+
+```cpp
+// Non-blocking mode
+socket.setNonBlocking(true);
+
+// Timeout
+socket.setTimeout(std::chrono::milliseconds(5000));
+
+// UDP broadcast
+udpSocket.setBroadcast(true);
+
+// TCP address reuse
+tcpServer.setReuseAddr(true);
+
+// Raw socket with IP header
+rawSocket.setIpHeaderInclude(true);
+```
+
 ### JSON Initialization Code Generator
 
 #### Step 1: Annotate your classes
@@ -333,6 +482,7 @@ Object-derived pointers (like `renderer`) are automatically resolved from the Ob
 │   ├── scheduler.hpp
 │   ├── logger.hpp
 │   ├── clock.hpp
+│   ├── socket.hpp
 │   └── json_init_generator.hpp
 ├── src/                  # Implementation files
 │   ├── json_node.cpp
@@ -341,6 +491,7 @@ Object-derived pointers (like `renderer`) are automatically resolved from the Ob
 │   ├── scheduler.cpp
 │   ├── logger.cpp
 │   ├── clock.cpp
+│   ├── socket.cpp
 │   ├── json_init_generator.cpp
 │   └── json_init_generator_main.cpp
 ├── example/              # Example usage
@@ -348,6 +499,7 @@ Object-derived pointers (like `renderer`) are automatically resolved from the Ob
 │   ├── scheduler_example.cpp
 │   ├── logger_example.cpp
 │   ├── clock_example.cpp
+│   ├── socket_example.cpp
 │   ├── json_init_example.hpp
 │   └── test_generated.cpp
 ├── CMakeLists.txt
@@ -364,6 +516,7 @@ The build system creates the following targets:
 - `scheduler_example` - Task scheduler example
 - `logger_example` - Logger system example
 - `clock_example` - Clock system example
+- `socket_example` - Socket system example
 - `test_generated` - Test for generated initialization code
 
 ## Installation

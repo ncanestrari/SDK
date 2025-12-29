@@ -146,8 +146,9 @@ std::string Logger::formatMessage(LogLevel level, const std::string& message) {
 
     // Format date/time
     std::string dateStr = fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d}", now, ms.count());
+    std::string levelStr = levelToString(level);
 
-    result = fmt::format(format, dateStr, moduleName, levelToString(level), message);
+    result = fmt::vformat(format, fmt::make_format_args(dateStr, moduleName, levelStr, message));
 
     return result;
 }

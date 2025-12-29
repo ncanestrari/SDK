@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 project(SDK)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -105,7 +105,10 @@ find_package(LLVM CONFIG)
 #    message(STATUS "WARNING: Building LLVM/Clang from source is very slow (1-2 hours)")
 #endif()
 
-# Create JsonParser library
+# Option to build shared or static library
+option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+
+# Create JsonParser library (can be STATIC or SHARED based on BUILD_SHARED_LIBS)
 add_library(sdk
     src/json_node.cpp
     src/memory_manager.cpp
@@ -113,14 +116,24 @@ add_library(sdk
     src/scheduler.cpp
     src/logger.cpp
     src/clock.cpp
+    src/socket.cpp
+    # Generated socket initialization files will be added after generation
 )
 
-target_include_directories(sdk PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(sdk PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
+    $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(sdk 
+target_link_libraries(sdk PUBLIC
     fmt::fmt
+)
+
+# Set version and soversion for shared library
+set_target_properties(sdk PROPERTIES
+    VERSION 1.0.0
+    SOVERSION 1
 )
 
 # Create code generator tool (only if Clang/LLVM available)
@@ -205,6 +218,15 @@ target_link_libraries(clock_example
     fmt::fmt
 )
 
+add_executable(socket_example
+    example/socket_example.cpp
+)
+
+target_link_libraries(socket_example
+    sdk
+    fmt::fmt
+)
+
 # Create test for generated code (only if code generator is available)
 #if(BUILD_CODE_GENERATOR)
 add_executable(test_generated
@@ -224,7 +246,7 @@ target_link_libraries(test_generated
     fmt::fmt
 )
 
-# Custom target to run code generator
+# Custom target to run code generator for examples
 add_custom_command(
     OUTPUT generated/gameentity_initializer.hpp generated/gameentity_initializer.cpp generated/gameentity_.conf
            generated/configuration_initializer.hpp generated/configuration_initializer.cpp generated/configuration_.conf
@@ -232,11 +254,47 @@ add_custom_command(
     COMMAND json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/example/json_init_example.hpp
             --output-dir generated
             -p ${CMAKE_CURRENT_BINARY_DIR}
-            -- -std=c++17
+            -- -std=c++20
             -I${CMAKE_CURRENT_SOURCE_DIR}/include
             -resource-dir /usr/local/lib/clang/21
     DEPENDS json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/example/json_init_example.hpp
     COMMENT "Generating JSON initialization code for each class"
+)
+
+# Custom target to run code generator for socket classes
+add_custom_command(
+    OUTPUT generated/socket/unixstreamsocket_initializer.hpp generated/socket/unixstreamsocket_initializer.cpp generated/socket/unixstreamsocket_.conf
+           generated/socket/unixstreamserversocket_initializer.hpp generated/socket/unixstreamserversocket_initializer.cpp generated/socket/unixstreamserversocket_.conf
+           generated/socket/unixdatagramsocket_initializer.hpp generated/socket/unixdatagramsocket_initializer.cpp generated/socket/unixdatagramsocket_.conf
+           generated/socket/tcpsocket_initializer.hpp generated/socket/tcpsocket_initializer.cpp generated/socket/tcpsocket_.conf
+           generated/socket/tcpserversocket_initializer.hpp generated/socket/tcpserversocket_initializer.cpp generated/socket/tcpserversocket_.conf
+           generated/socket/udpsocket_initializer.hpp generated/socket/udpsocket_initializer.cpp generated/socket/udpsocket_.conf
+           generated/socket/rawsocket_initializer.hpp generated/socket/rawsocket_initializer.cpp generated/socket/rawsocket_.conf
+           generated/socket/unixseqpacketsocket_initializer.hpp generated/socket/unixseqpacketsocket_initializer.cpp generated/socket/unixseqpacketsocket_.conf
+           generated/socket/unixseqpacketserversocket_initializer.hpp generated/socket/unixseqpacketserversocket_initializer.cpp generated/socket/unixseqpacketserversocket_.conf
+    COMMAND ${CMAKE_COMMAND} -E make_directory generated/socket
+    COMMAND json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/include/socket.hpp
+            --output-dir generated/socket
+            -p ${CMAKE_CURRENT_BINARY_DIR}
+            -- -std=c++20
+            -I${CMAKE_CURRENT_SOURCE_DIR}/include
+            -resource-dir /usr/local/lib/clang/21
+    DEPENDS json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/include/socket.hpp
+    COMMENT "Generating JSON initialization code for socket classes"
+)
+
+# Custom target to run code generator for Scheduler class
+add_custom_command(
+    OUTPUT generated/scheduler/scheduler_initializer.hpp generated/scheduler/scheduler_initializer.cpp generated/scheduler/scheduler_.conf
+    COMMAND ${CMAKE_COMMAND} -E make_directory generated/scheduler
+    COMMAND json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/include/scheduler.hpp
+            --output-dir generated/scheduler
+            -p ${CMAKE_CURRENT_BINARY_DIR}
+            -- -std=c++20
+            -I${CMAKE_CURRENT_SOURCE_DIR}/include
+            -resource-dir /usr/local/lib/clang/21
+    DEPENDS json_init_generator ${CMAKE_CURRENT_SOURCE_DIR}/include/scheduler.hpp
+    COMMENT "Generating JSON initialization code for Scheduler class"
 )
 
 add_custom_target(generate_code
@@ -244,6 +302,35 @@ add_custom_target(generate_code
             generated/configuration_initializer.hpp generated/configuration_initializer.cpp generated/configuration_.conf
             generated/playerstats_initializer.hpp generated/playerstats_initializer.cpp generated/playerstats_.conf
 )
+
+add_custom_target(generate_socket_code
+    DEPENDS generated/socket/unixstreamsocket_initializer.cpp generated/socket/tcpsocket_initializer.cpp
+            generated/socket/udpsocket_initializer.cpp generated/socket/rawsocket_initializer.cpp
+            generated/socket/unixstreamserversocket_initializer.cpp generated/socket/tcpserversocket_initializer.cpp
+            generated/socket/unixdatagramsocket_initializer.cpp generated/socket/unixseqpacketsocket_initializer.cpp
+            generated/socket/unixseqpacketserversocket_initializer.cpp
+)
+
+add_custom_target(generate_scheduler_code
+    DEPENDS generated/scheduler/scheduler_initializer.cpp
+)
+
+# Add generated socket source files to SDK library
+target_sources(sdk PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/unixstreamsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/unixstreamserversocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/unixdatagramsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/tcpsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/tcpserversocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/udpsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/rawsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/unixseqpacketsocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/unixseqpacketserversocket_initializer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/scheduler/scheduler_initializer.cpp
+)
+
+# Make SDK library depend on socket and scheduler code generation
+add_dependencies(sdk generate_socket_code generate_scheduler_code)
 
 # Make test_generated depend on code generation
 add_dependencies(test_generated generate_code)
@@ -266,20 +353,57 @@ else()
 endif()
 
 # Installation
-#if(BUILD_CODE_GENERATOR)
 install(TARGETS sdk json_init_generator
+    EXPORT SDKTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
+    INCLUDES DESTINATION include
 )
-#else()
-#    install(TARGETS sdk
-#        RUNTIME DESTINATION bin
-#        LIBRARY DESTINATION lib
-#        ARCHIVE DESTINATION lib
-#    )
-#endif()
 
-install(FILES json_node.hpp json_init_generator.hpp
+# Install public headers
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/json_node.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/json_init_generator.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/socket.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/memory_manager.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/object.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/scheduler.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/logger.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/clock.hpp
     DESTINATION include
+)
+
+# Install generated socket initialization files (headers and source)
+install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/socket/
+    DESTINATION include/generated/socket
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.cpp"
+)
+
+# Export targets for find_package
+install(EXPORT SDKTargets
+    FILE SDKTargets.cmake
+    NAMESPACE SDK::
+    DESTINATION lib/cmake/SDK
+)
+
+# Create and install package config file
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/SDKConfigVersion.cmake"
+    VERSION 1.0.0
+    COMPATIBILITY AnyNewerVersion
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDKConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SDKConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/SDK
+    NO_CHECK_REQUIRED_COMPONENTS_MACRO
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/SDKConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/SDKConfigVersion.cmake"
+    DESTINATION lib/cmake/SDK
 )

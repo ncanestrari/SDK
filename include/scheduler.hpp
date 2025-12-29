@@ -11,7 +11,7 @@
 #include <queue>
 #include <thread>
 
-class Scheduler : public Object {
+class __attribute__((annotate("initialize"))) Scheduler : public Object {
 private:
     std::queue<Task> taskQueue;
     std::thread workerThread;
