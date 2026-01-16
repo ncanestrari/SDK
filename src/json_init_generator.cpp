@@ -33,29 +33,43 @@ bool JsonInitVisitor::isDerivedFromObject(clang::QualType type) {
     } else if (canonicalType->isReferenceType()) {
         canonicalType = canonicalType.getNonReferenceType();
     }
-    
+
     const auto* recordType = canonicalType->getAs<clang::RecordType>();
     if (!recordType) {
         return false;
     }
-    
+
     const auto* cxxRecordDecl = clang::dyn_cast<clang::CXXRecordDecl>(recordType->getDecl());
     if (!cxxRecordDecl) {
         return false;
     }
-    
+
+    // Check if this is a template specialization (like std::shared_ptr<T>)
+    // and extract the template argument to check
+    if (const auto* specDecl = clang::dyn_cast<clang::ClassTemplateSpecializationDecl>(cxxRecordDecl)) {
+        std::string className = specDecl->getNameAsString();
+        // Check for smart pointer types
+        if (className == "shared_ptr" || className == "unique_ptr" || className == "weak_ptr") {
+            const auto& templateArgs = specDecl->getTemplateArgs();
+            if (templateArgs.size() > 0 && templateArgs[0].getKind() == clang::TemplateArgument::Type) {
+                // Recursively check if the template argument derives from Object
+                return isDerivedFromObject(templateArgs[0].getAsType());
+            }
+        }
+    }
+
     // Check if this class or any of its bases is named "Object"
     if (cxxRecordDecl->getNameAsString() == "Object") {
         return true;
     }
-    
+
     // Check base classes
     for (const auto& base : cxxRecordDecl->bases()) {
         if (isDerivedFromObject(base.getType())) {
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -65,24 +79,30 @@ std::string JsonInitVisitor::getFullTypeName(clang::QualType type) {
     const clang::Type* typePtr = unqualType.getTypePtr();
 
     // For record types (classes/structs), get the fully qualified name
+    // But skip template specializations (like std::shared_ptr<T>) - they need full type printing
     if (const auto* recordType = typePtr->getAs<clang::RecordType>()) {
         if (const auto* recordDecl = recordType->getDecl()) {
-            std::string qualifiedName = recordDecl->getQualifiedNameAsString();
-            if (!qualifiedName.empty() && qualifiedName.find("::") != std::string::npos) {
-                // Build the type with qualifiers
-                std::string result;
-                if (type.isConstQualified()) {
-                    result = "const ";
+            // Check if this is a template specialization - if so, use default printing
+            if (clang::isa<clang::ClassTemplateSpecializationDecl>(recordDecl)) {
+                // Fall through to default printing for template specializations
+            } else {
+                std::string qualifiedName = recordDecl->getQualifiedNameAsString();
+                if (!qualifiedName.empty() && qualifiedName.find("::") != std::string::npos) {
+                    // Build the type with qualifiers
+                    std::string result;
+                    if (type.isConstQualified()) {
+                        result = "const ";
+                    }
+                    result += qualifiedName;
+                    if (type->isPointerType()) {
+                        result += " *";
+                    } else if (type->isLValueReferenceType()) {
+                        result += " &";
+                    } else if (type->isRValueReferenceType()) {
+                        result += " &&";
+                    }
+                    return result;
                 }
-                result += qualifiedName;
-                if (type->isPointerType()) {
-                    result += " *";
-                } else if (type->isLValueReferenceType()) {
-                    result += " &";
-                } else if (type->isRValueReferenceType()) {
-                    result += " &&";
-                }
-                return result;
             }
         }
     }
@@ -103,6 +123,21 @@ std::string JsonInitVisitor::getBaseTypeName(clang::QualType type) {
         baseType = baseType.getNonReferenceType();
     }
 
+    // Check for template specializations like shared_ptr<T>, unique_ptr<T>, etc.
+    if (const auto* recordType = baseType->getAs<clang::RecordType>()) {
+        if (const auto* specDecl = clang::dyn_cast<clang::ClassTemplateSpecializationDecl>(recordType->getDecl())) {
+            std::string className = specDecl->getNameAsString();
+            // For smart pointer types, extract the template argument
+            if (className == "shared_ptr" || className == "unique_ptr" || className == "weak_ptr") {
+                const auto& templateArgs = specDecl->getTemplateArgs();
+                if (templateArgs.size() > 0 && templateArgs[0].getKind() == clang::TemplateArgument::Type) {
+                    // Return the template argument type name
+                    return getFullTypeName(templateArgs[0].getAsType());
+                }
+            }
+        }
+    }
+
     // Use getFullTypeName to get properly qualified name
     return getFullTypeName(baseType);
 }
@@ -110,20 +145,25 @@ std::string JsonInitVisitor::getBaseTypeName(clang::QualType type) {
 ParameterInfo JsonInitVisitor::analyzeParameter(const clang::ParmVarDecl* param) {
     ParameterInfo info;
     info.name = param->getNameAsString();
-    
+
     clang::QualType paramType = param->getType();
     info.type = getFullTypeName(paramType);
     info.isPointer = paramType->isPointerType();
     info.isReference = paramType->isReferenceType();
-    
-    if (info.isPointer || info.isReference) {
+
+    // Check if this is a smart pointer type (shared_ptr, unique_ptr, etc.)
+    bool isSmartPtr = (info.type.find("std::shared_ptr") != std::string::npos ||
+                       info.type.find("std::unique_ptr") != std::string::npos ||
+                       info.type.find("std::weak_ptr") != std::string::npos);
+
+    if (info.isPointer || info.isReference || isSmartPtr) {
         info.baseType = getBaseTypeName(paramType);
         info.isDerivedFromObject = isDerivedFromObject(paramType);
     } else {
         info.baseType = info.type;
         info.isDerivedFromObject = isDerivedFromObject(paramType);
     }
-    
+
     // Check for default value
     info.hasDefaultValue = param->hasDefaultArg();
     if (info.hasDefaultValue && param->getDefaultArg()) {
@@ -132,7 +172,7 @@ ParameterInfo JsonInitVisitor::analyzeParameter(const clang::ParmVarDecl* param)
         param->getDefaultArg()->printPretty(stream, nullptr, context->getPrintingPolicy());
         stream.flush();
     }
-    
+
     return info;
 }
 
@@ -256,11 +296,13 @@ std::string CodeGenerator::generateParameterInitialization(const ParameterInfo& 
     localType.erase(0, localType.find_first_not_of(" \t"));
     localType.erase(localType.find_last_not_of(" \t") + 1);
 
-    if (param.isDerivedFromObject && (param.isPointer || param.isReference)) {
-        // Object pointer/reference from registry
+    // Check if this is a shared_ptr type (for Object-derived or any type)
+    bool isSharedPtr = (localType.find("std::shared_ptr") != std::string::npos);
+
+    if (param.isDerivedFromObject && (param.isPointer || param.isReference || isSharedPtr)) {
+        // Object pointer/reference/shared_ptr from registry
         // Check if it's a raw pointer or shared_ptr
-        bool isRawPointer = (localType.find("std::shared_ptr") == std::string::npos &&
-                            localType.find("*") != std::string::npos);
+        bool isRawPointer = !isSharedPtr && localType.find("*") != std::string::npos;
 
         if (isRawPointer) {
             // Raw pointer - use .get() on the shared_ptr

@@ -4,23 +4,29 @@
 
 set -e
 
+if [[ "$1" == "-d" ]]; then
+  BUILD_TYPE="Debug"
+  BUILD_FOLDER="debug"
+else
+  BUILD_TYPE="Release"
+  BUILD_FOLDER="release"
+fi
+
 echo "=== JSON Initialization Code Generator Demo ==="
 echo
 
 # Build the project
 echo "Building project..."
-mkdir -p build
-cd build
-cmake ..
-make -j$(nproc)
-cd ..
+mkdir -p $BUILD_FOLDER
+cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -S . -G Ninja -B $BUILD_FOLDER
+cmake --build $BUILD_FOLDER
 
 echo "✓ Build complete"
 echo
 
 # Run the code generator on example classes
 echo "Running code generator on json_init_example.hpp..."
-./build/json_init_generator json_init_example.hpp --output-dir generated
+./$BUILD_FOLDER/json_init_generator example/json_init_example.hpp --output-dir generated -p debug -- std=c++20 -I./include/ -resource-dir /usr/local/lib/clang/21/
 
 echo "✓ Code generation complete"
 echo

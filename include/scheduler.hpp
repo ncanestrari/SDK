@@ -14,7 +14,8 @@
 class __attribute__((annotate("initialize"))) Scheduler : public Object {
 private:
     std::queue<Task> taskQueue;
-    std::thread workerThread;
+    std::vector<std::thread> workerThreads;
+    size_t threadCount;
     mutable std::mutex queueMutex;
     std::condition_variable condition;
     std::condition_variable completionCondition;
@@ -25,8 +26,8 @@ private:
     void worker();
     
 public:
-    // Constructor - creates single worker thread
-    Scheduler();
+    // Constructor - creates worker threads (default: 1)
+    explicit Scheduler(size_t numThreads = 1);
     
     // Destructor - stops worker thread
     ~Scheduler() override;
